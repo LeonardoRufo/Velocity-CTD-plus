@@ -303,6 +303,9 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
   /** Hash of the registries and tags the client last received, in a real configuration phase. */
   private volatile @Nullable String clientRegistryFingerprint;
 
+  /** The same, split per registry, to name what differs when a switch has to reconfigure. */
+  private volatile Map<String, String> clientRegistryHashes = Map.of();
+
   private @Nullable Locale effectiveLocale;
 
   private final @Nullable IdentifiedKey playerKey;
@@ -1636,6 +1639,14 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
 
   public void setClientRegistryFingerprint(@Nullable String clientRegistryFingerprint) {
     this.clientRegistryFingerprint = clientRegistryFingerprint;
+  }
+
+  public Map<String, String> getClientRegistryHashes() {
+    return clientRegistryHashes;
+  }
+
+  public void setClientRegistryHashes(Map<String, String> clientRegistryHashes) {
+    this.clientRegistryHashes = clientRegistryHashes;
   }
 
   @Override

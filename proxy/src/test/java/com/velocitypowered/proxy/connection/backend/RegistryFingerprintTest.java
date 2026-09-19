@@ -35,6 +35,7 @@ import com.velocitypowered.proxy.protocol.packet.config.TagsUpdatePacket;
 import com.velocitypowered.proxy.server.VelocityRegisteredServer;
 import io.netty.buffer.Unpooled;
 import java.net.InetSocketAddress;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -63,6 +64,19 @@ class RegistryFingerprintTest {
     final Map<String, Map<String, int[]>> otherTags =
         ImmutableMap.of("minecraft:block", ImmutableMap.of("minecraft:climbable", new int[] {7}));
     assertNotEquals(fingerprint(VANILLA_BIOMES, TAGS), fingerprint(VANILLA_BIOMES, otherTags));
+  }
+
+  @Test
+  void namesTheRegistriesTwoBackendsDoNotAgreeOn() {
+    final Map<String, String> lobby =
+        Map.of("minecraft:worldgen/biome", "aaa", "minecraft:dialog", "bbb", "(tags)", "ccc");
+    final Map<String, String> world =
+        Map.of("minecraft:worldgen/biome", "zzz", "minecraft:dialog", "bbb", "(tags)", "ccc");
+    assertEquals(List.of("minecraft:worldgen/biome"),
+        RegistryFingerprint.differences(world, lobby));
+    assertEquals(List.of(), RegistryFingerprint.differences(lobby, lobby));
+    assertEquals(List.of("minecraft:enchantment"), RegistryFingerprint.differences(
+        Map.of("minecraft:enchantment", "aaa"), Map.of()), "one side missing it entirely");
   }
 
   @Test

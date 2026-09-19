@@ -70,6 +70,7 @@ import io.netty.channel.Channel;
 import io.netty.handler.timeout.ReadTimeoutHandler;
 import java.net.InetSocketAddress;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -321,8 +322,17 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
       return true;
     }
 
-    // The client went through configuration, so it now holds what this server sent.
+    // The client went through configuration, so it now holds what this server sent. Naming what
+    // changed says which registries two backends have to agree on to switch without one.
+    final Map<String, String> sentPerRegistry = registryFingerprint.perRegistry();
+    final List<String> differing =
+        RegistryFingerprint.differences(sentPerRegistry, player.getClientRegistryHashes());
+    if (!player.getClientRegistryHashes().isEmpty() && !differing.isEmpty()) {
+      LOGGER.info("{} had to be reconfigured for {}: {} differ from the server it came from",
+          player.getUsername(), serverConn.getServerInfo().getName(), String.join(", ", differing));
+    }
     player.setClientRegistryFingerprint(sentRegistries);
+    player.setClientRegistryHashes(sentPerRegistry);
 
     // Start client-side configuration; may hold the player to apply a resource pack.
     // noinspection DataFlowIssue
@@ -532,8 +542,10 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
    * @param player the switching player
    */
   private void switchAgainThroughConfiguration(ConnectedPlayer player) {
-    LOGGER.warn("{} sends registries that {} does not hold; switching again through configuration",
-        serverConn.getServerInfo().getName(), player.getUsername());
+    LOGGER.warn("{} sends registries that {} does not hold ({}); switching again through "
+            + "configuration", serverConn.getServerInfo().getName(), player.getUsername(),
+        String.join(", ", RegistryFingerprint.differences(
+            registryFingerprint.perRegistry(), player.getClientRegistryHashes())));
     serverConn.disconnect();
     // Cancelled rather than failed: there is nothing to tell the player, the retry takes over.
     resultFuture.complete(ConnectionRequestResults.plainResult(
