@@ -81,6 +81,7 @@ import com.velocitypowered.proxy.protocol.util.PluginMessageUtil;
 import com.velocitypowered.proxy.util.CharacterUtil;
 import com.velocitypowered.proxy.util.except.QuietRuntimeException;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import io.netty.util.ReferenceCountUtil;
@@ -93,6 +94,7 @@ import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import net.kyori.adventure.key.Key;
@@ -121,6 +123,12 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
       Integer.getInteger("velocity.max-queued-login-plugin-messages", 1024);
 
   private static final Logger LOGGER = LogManager.getLogger(ClientPlaySessionHandler.class);
+
+  // The game event that puts the terrain screen up, and how long to wait for the client to report
+  // that it is done before answering for it.
+  private static final int GAME_STATE_CHANGE_PACKET_ID = 0x26;
+  private static final int LEVEL_CHUNKS_LOAD_START = 13;
+  private static final long CLIENT_LOADED_FALLBACK_SECONDS = 5;
 
   private final ConnectedPlayer player;
 
@@ -712,12 +720,21 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
         player.getConnection().delayedWrite(entityRemoval);
       }
 
-      // Because it never receives a join game, the client never reports that it finished loading
-      // the world. The backend waits for that before it accepts movement, so the player would
-      // stand still server-side while their client walks away. It is loaded by definition here,
-      // so say so on its behalf.
-      serverMc.write(ServerboundPlayerLoadedPacket.INSTANCE);
-      destination.setClientLoaded(true);
+      // Between servers that share a map, keeping the world is invisible. Between different maps
+      // the player would watch the old one be replaced chunk by chunk, so ask the client for the
+      // terrain screen it shows on a long teleport: the world is still not rebuilt -- no flicker
+      // of tab list, scoreboard or resource pack -- and the screen goes when the chunks are in.
+      final ByteBuf waitingForChunks = waitingForChunks(player.getProtocolVersion(),
+          player.getConnection().getChannel().alloc());
+      if (waitingForChunks == null) {
+        // No screen to ask for on this version. The client then never reports that it finished
+        // loading, and the destination holds a player still until it hears that, so say it here.
+        serverMc.write(ServerboundPlayerLoadedPacket.INSTANCE);
+        destination.setClientLoaded(true);
+      } else {
+        player.getConnection().delayedWrite(waitingForChunks);
+        answerForSilentClient(destination, serverMc);
+      }
     } else {
       // Clear tab list to avoid duplicate entries
       player.getTabList().clearAll();
@@ -788,6 +805,48 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
     player.getConnection().flush();
     serverMc.flush();
     destination.completeJoin();
+  }
+
+  /**
+   * Asks the client to wait for the destination's chunks behind the terrain screen.
+   *
+   * @param version the client's protocol version
+   * @param alloc   the allocator for the packet
+   * @return the packet, or {@code null} on a version whose ID the proxy does not know
+   */
+  private static @Nullable ByteBuf waitingForChunks(ProtocolVersion version, ByteBufAllocator alloc) {
+    // ponytail: 26.1-26.2, as everywhere else here. Elsewhere the client is told nothing and keeps
+    // the previous world on screen while the new one arrives.
+    if (version.lessThan(ProtocolVersion.MINECRAFT_26_1)
+        || version.greaterThan(ProtocolVersion.MINECRAFT_26_2)) {
+      return null;
+    }
+    final ByteBuf packet = alloc.buffer(6);
+    ProtocolUtils.writeVarInt(packet, GAME_STATE_CHANGE_PACKET_ID);
+    packet.writeByte(LEVEL_CHUNKS_LOAD_START);
+    packet.writeFloat(0f);
+    return packet;
+  }
+
+  /**
+   * Unblocks the destination if the client never reports that it loaded.
+   *
+   * <p>The client answers the request above by itself, and that answer is what the destination is
+   * waiting for before it accepts the player's movement. A client that answered while the proxy
+   * still had it on the previous server, or that does not answer at all, would otherwise be left
+   * standing still there.</p>
+   *
+   * @param destination the server being switched to
+   * @param serverMc    its connection
+   */
+  private void answerForSilentClient(VelocityServerConnection destination,
+                                               MinecraftConnection serverMc) {
+    serverMc.eventLoop().schedule(() -> {
+      if (!destination.isClientLoaded() && !serverMc.isClosed()) {
+        serverMc.write(ServerboundPlayerLoadedPacket.INSTANCE);
+        destination.setClientLoaded(true);
+      }
+    }, CLIENT_LOADED_FALLBACK_SECONDS, TimeUnit.SECONDS);
   }
 
   private void rememberClientWorld(JoinGamePacket joinGame) {
