@@ -102,7 +102,7 @@ public final class SeamlessPlugin extends JavaPlugin implements Listener {
     if (entityIdChannel == null || entityIdApplier == null) {
       return;
     }
-    final int entityId = entityIdChannel.takeEntityId(event.getPlayer().getUniqueId());
+    final int entityId = entityIdChannel.takeEntityId(event.getPlayer().getName());
     if (entityId <= 0) {
       return;
     }
@@ -119,7 +119,7 @@ public final class SeamlessPlugin extends JavaPlugin implements Listener {
   @EventHandler
   public void onPlayerQuit(final PlayerQuitEvent event) {
     if (entityIdChannel != null) {
-      entityIdChannel.forget(event.getPlayer().getUniqueId());
+      entityIdChannel.forget(event.getPlayer().getName());
     }
     if (loadingScreenSuppressor != null) {
       loadingScreenSuppressor.forget(event.getPlayer().getUniqueId());

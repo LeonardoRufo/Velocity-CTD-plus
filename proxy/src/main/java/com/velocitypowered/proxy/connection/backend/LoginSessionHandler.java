@@ -53,15 +53,14 @@ import java.util.concurrent.CompletableFuture;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Handles a player trying to log into the proxy.
  */
 public class LoginSessionHandler implements MinecraftSessionHandler {
 
-  static {
-    LogManager.getLogger(LoginSessionHandler.class);
-  }
+  private static final Logger LOGGER = LogManager.getLogger(LoginSessionHandler.class);
 
   /**
    * Login-phase channel the backend companion plugin uses to ask for the client's entity ID, so a
@@ -288,6 +287,11 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
     final int entityId = server.getConfiguration().isKeepClientWorldOnSwitch()
         ? ClientWorldSwitches.networkEntityId(player.getUniqueId())
         : 0;
+
+    if (entityId > 0) {
+      LOGGER.info("Asking {} to join {} as entity {}", serverConn.getServerInfo().getName(),
+          player.getUsername(), entityId);
+    }
 
     final ByteBuf response = Unpooled.buffer(5);
     response.writeByte(SEAMLESS_FORMAT_VERSION);

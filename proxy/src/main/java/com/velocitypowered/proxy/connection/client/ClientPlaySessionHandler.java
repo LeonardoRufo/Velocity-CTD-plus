@@ -837,11 +837,25 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
     }
 
     if (joinGame.getEntityId() != clientEntityId) {
+      // Worth a line: this is a backend that did not apply the ID the proxy handed it, and the
+      // player pays a loading screen for it on every switch.
+      LOGGER.info("{} rebuilds its world for {}: it joined them as entity {}, their client has {}",
+          player.getConnectedServer() == null ? "the destination"
+              : player.getConnectedServer().getServerInfo().getName(),
+          player.getUsername(), joinGame.getEntityId(), clientEntityId);
       return false;
     }
 
-    return Objects.equals(dimensionKey(joinGame.getDimensionInfo(), joinGame.getDimension()),
-        clientDimension);
+    final String destination = dimensionKey(joinGame.getDimensionInfo(), joinGame.getDimension());
+    if (!Objects.equals(destination, clientDimension)) {
+      LOGGER.info("{} rebuilds its world for {}: it joined them into {}, their client is in {}",
+          player.getConnectedServer() == null ? "the destination"
+              : player.getConnectedServer().getServerInfo().getName(),
+          player.getUsername(), destination, clientDimension);
+      return false;
+    }
+
+    return true;
   }
 
   private void doFastClientServerSwitch(JoinGamePacket joinGame) {

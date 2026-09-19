@@ -24,8 +24,8 @@ import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.player.User;
 import com.github.retrooper.packetevents.wrapper.login.client.WrapperLoginClientPluginResponse;
 import com.github.retrooper.packetevents.wrapper.login.server.WrapperLoginServerPluginRequest;
+import java.util.Locale;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
@@ -61,7 +61,7 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
    * Entity IDs the proxy reported, keyed by player, waiting to be applied when the player spawns.
    * Entries are removed when used, and by the plugin when a login does not complete.
    */
-  private final Map<UUID, Integer> pending = new ConcurrentHashMap<>();
+  private final Map<String, Integer> pending = new ConcurrentHashMap<>();
 
   ProxyEntityIdChannel(final Logger logger) {
     // Run late enough that the login has a user profile, but this only reads and injects.
@@ -112,32 +112,37 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
       return; // First join, or the proxy has nothing to preserve.
     }
 
+    // Keyed by name, not UUID: mid-login the connection has a name -- it came in the login start --
+    // but not always a UUID, and an answer dropped for want of one is dropped in silence, which is
+    // exactly how this went unnoticed. The name is unique among the players on a server.
     final User user = event.getUser();
-    final UUID uuid = user.getUUID();
-    if (uuid == null) {
+    final String name = user.getProfile() == null ? null : user.getProfile().getName();
+    if (name == null) {
+      logger.warning("The proxy answered with entity ID " + entityId + " for a connection with no "
+          + "name yet; it joins with an ID of this server's own and gets a loading screen");
       return;
     }
-    pending.put(uuid, entityId);
+    pending.put(name.toLowerCase(Locale.ROOT), entityId);
   }
 
   /**
    * Takes the entity ID the proxy reported for a player, if any.
    *
-   * @param player the player's unique ID
+   * @param playerName the player's name
    * @return the entity ID to apply, or {@code 0} if the proxy reported none
    */
-  int takeEntityId(final UUID player) {
-    final Integer entityId = pending.remove(player);
+  int takeEntityId(final String playerName) {
+    final Integer entityId = pending.remove(playerName.toLowerCase(Locale.ROOT));
     return entityId == null ? 0 : entityId;
   }
 
   /**
    * Drops any recorded ID for a player whose login did not reach the spawn stage.
    *
-   * @param player the player's unique ID
+   * @param playerName the player's name
    */
-  void forget(final UUID player) {
-    pending.remove(player);
+  void forget(final String playerName) {
+    pending.remove(playerName.toLowerCase(Locale.ROOT));
   }
 
   /**
