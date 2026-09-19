@@ -304,6 +304,8 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
         player.getConnection().getActiveSessionHandler() instanceof ClientConfigSessionHandler handler
             ? handler : null;
 
+    // Read before recording, to tell "this server changed" from "this proxy had never seen it".
+    final String knownFingerprint = serverConn.getServer().getRegistryFingerprint();
     final String sentRegistries = rememberRegistries(serverConn.getServer(), player);
     if (configHandler == null && !sentRegistries.equals(player.getClientRegistryFingerprint())) {
       switchAgainThroughConfiguration(player);
@@ -347,7 +349,10 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
     final Map<String, String> sentPerRegistry = registryFingerprint.perRegistry();
     final List<String> differing =
         RegistryFingerprint.differences(sentPerRegistry, player.getClientRegistryHashes());
-    if (!player.getClientRegistryHashes().isEmpty() && !differing.isEmpty()) {
+    if (knownFingerprint != null && !player.getClientRegistryHashes().isEmpty()
+        && !differing.isEmpty()) {
+      // Only when this proxy had already seen the destination configure: otherwise the client was
+      // reconfigured because nothing was known about it yet, and naming registries would mislead.
       LOGGER.info("{} had to be reconfigured for {}: {} differ from the server it came from",
           player.getUsername(), serverConn.getServerInfo().getName(), String.join(", ", differing));
     }

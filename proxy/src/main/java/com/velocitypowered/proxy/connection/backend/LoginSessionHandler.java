@@ -289,7 +289,8 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
         : 0;
 
     if (entityId > 0) {
-      LOGGER.info("Asking {} to join {} as entity {}", serverConn.getServerInfo().getName(),
+      // One line per switch is noise once this works; it is here for when it stops working.
+      LOGGER.debug("Asking {} to join {} as entity {}", serverConn.getServerInfo().getName(),
           player.getUsername(), entityId);
     }
 
