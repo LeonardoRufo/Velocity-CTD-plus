@@ -44,6 +44,7 @@ import com.velocitypowered.proxy.protocol.packet.LoginPluginMessagePacket;
 import com.velocitypowered.proxy.protocol.packet.LoginPluginResponsePacket;
 import com.velocitypowered.proxy.protocol.packet.ServerLoginSuccessPacket;
 import com.velocitypowered.proxy.protocol.packet.SetCompressionPacket;
+import com.velocitypowered.proxy.server.VelocityRegisteredServer;
 import com.velocitypowered.proxy.util.except.QuietRuntimeException;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
@@ -191,8 +192,10 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
         // With "remove-reconfig" the client is left in play for the whole switch: this is the one
         // place that would otherwise push it back into configuration, and the "Reconfiguring..."
         // screen it shows. The backend still runs its own configuration phase; ConfigSessionHandler
-        // answers it on the client's behalf.
-        if (!server.getConfiguration().isRemoveReconfig()) {
+        // answers it on the client's behalf. Only when the client already holds the registries and
+        // tags this server sends, though, since it would decode this server with the ones it has.
+        if (!server.getConfiguration().isRemoveReconfig()
+            || !clientHoldsRegistriesOf(player, serverConn.getServer())) {
           smc.setAutoReading(false);
           clientPlaySessionHandler.doSwitch().thenRunAsync(() -> smc.setAutoReading(true), smc.eventLoop());
         }
@@ -246,6 +249,20 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
           new QuietRuntimeException("The connection to the remote server was unexpectedly closed.")
       );
     }
+  }
+
+  /**
+   * Returns whether the client already holds exactly the registries and tags {@code target} sent
+   * the last time the proxy saw it configure. A server not seen yet since the proxy started does
+   * not count; switching there through the configuration state is what records it.
+   *
+   * @param player the switching player
+   * @param target the destination
+   * @return {@code true} if the client can stay in play for this switch
+   */
+  static boolean clientHoldsRegistriesOf(ConnectedPlayer player, VelocityRegisteredServer target) {
+    final String held = player.getClientRegistryFingerprint();
+    return held != null && held.equals(target.getRegistryFingerprint());
   }
 
   /**

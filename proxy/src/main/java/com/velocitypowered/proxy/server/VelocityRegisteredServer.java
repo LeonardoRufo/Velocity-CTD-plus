@@ -77,9 +77,25 @@ public class VelocityRegisteredServer implements RegisteredServer, ForwardingAud
 
   private final Map<UUID, ConnectedPlayer> players = new ConcurrentHashMap<>();
 
+  private volatile @Nullable String registryFingerprint;
+
   public VelocityRegisteredServer(@Nullable VelocityServer server, ServerInfo serverInfo) {
     this.server = server;
     this.serverInfo = Preconditions.checkNotNull(serverInfo, "serverInfo");
+  }
+
+  /**
+   * Returns the hash of the registries and tags this server sent in the last configuration phase
+   * the proxy saw, or {@code null} if it has not seen one yet.
+   *
+   * @return the registry fingerprint
+   */
+  public @Nullable String getRegistryFingerprint() {
+    return registryFingerprint;
+  }
+
+  public void setRegistryFingerprint(@Nullable String registryFingerprint) {
+    this.registryFingerprint = registryFingerprint;
   }
 
   @Override
