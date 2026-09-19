@@ -20,8 +20,10 @@ package com.velocityctd.seamless;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketListenerPriority;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
+import com.github.retrooper.packetevents.event.UserDisconnectEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.player.User;
+import com.github.retrooper.packetevents.wrapper.login.client.WrapperLoginClientLoginStart;
 import com.github.retrooper.packetevents.wrapper.login.client.WrapperLoginClientPluginResponse;
 import com.github.retrooper.packetevents.wrapper.login.server.WrapperLoginServerPluginRequest;
 import java.util.Locale;
@@ -63,6 +65,12 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
    */
   private final Map<String, Integer> pending = new ConcurrentHashMap<>();
 
+  /**
+   * The name each connection gave in its login start, since that is the only place it is on offer
+   * before the answer comes back: mid-login the connection carries neither a UUID nor a profile.
+   */
+  private final Map<User, String> names = new ConcurrentHashMap<>();
+
   ProxyEntityIdChannel(final Logger logger) {
     // Run late enough that the login has a user profile, but this only reads and injects.
     super(PacketListenerPriority.NORMAL);
@@ -78,7 +86,16 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
     }
   }
 
+  @Override
+  public void onUserDisconnect(final UserDisconnectEvent event) {
+    final String name = names.remove(event.getUser());
+    if (name != null) {
+      pending.remove(name.toLowerCase(Locale.ROOT));
+    }
+  }
+
   private void askProxy(final PacketReceiveEvent event) {
+    names.put(event.getUser(), new WrapperLoginClientLoginStart(event).getUsername());
     // Sent as the login starts so the answer is back well before the player spawns. The payload is
     // just our format version, so a future proxy can tell what this plugin understands.
     final WrapperLoginServerPluginRequest request = new WrapperLoginServerPluginRequest(
@@ -112,14 +129,14 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
       return; // First join, or the proxy has nothing to preserve.
     }
 
-    // Keyed by name, not UUID: mid-login the connection has a name -- it came in the login start --
-    // but not always a UUID, and an answer dropped for want of one is dropped in silence, which is
-    // exactly how this went unnoticed. The name is unique among the players on a server.
+    // Keyed by name, not UUID: mid-login the connection has neither a UUID nor a profile, and an
+    // answer dropped for want of one is dropped in silence, which is exactly how this went
+    // unnoticed. The name comes off the login start, and is unique among the players on a server.
     final User user = event.getUser();
-    final String name = user.getProfile() == null ? null : user.getProfile().getName();
+    final String name = names.remove(user);
     if (name == null) {
-      logger.warning("The proxy answered with entity ID " + entityId + " for a connection with no "
-          + "name yet; it joins with an ID of this server's own and gets a loading screen");
+      logger.warning("The proxy answered with entity ID " + entityId + " for a connection whose "
+          + "login start was never seen; it joins with an ID of this server's own");
       return;
     }
     pending.put(name.toLowerCase(Locale.ROOT), entityId);
