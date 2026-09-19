@@ -20,6 +20,8 @@ package com.velocityctd.seamless;
 import java.lang.reflect.Method;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.bukkit.Bukkit;
+import org.bukkit.World;
 import org.bukkit.entity.Player;
 
 /**
@@ -39,6 +41,8 @@ final class EntityIdApplier {
   private final Logger logger;
   private final Method getHandle;
   private final Method setId;
+  private final Method getWorldHandle;
+  private final Method getEntityById;
   private final String unavailableReason;
 
   EntityIdApplier(final Logger logger) {
@@ -46,6 +50,8 @@ final class EntityIdApplier {
 
     Method handleMethod = null;
     Method setIdMethod = null;
+    Method worldHandleMethod = null;
+    Method entityByIdMethod = null;
     String failure = null;
 
     try {
@@ -56,6 +62,11 @@ final class EntityIdApplier {
       final Class<?> nmsEntity = Class.forName("net.minecraft.world.entity.Entity");
       setIdMethod = nmsEntity.getDeclaredMethod("setId", int.class);
       setIdMethod.setAccessible(true);
+      // For the check below: an ID already in use belongs to some entity in some world, and the
+      // server refuses to add a second one under it.
+      worldHandleMethod = Class.forName("org.bukkit.craftbukkit.CraftWorld").getMethod("getHandle");
+      entityByIdMethod = Class.forName("net.minecraft.server.level.ServerLevel")
+          .getMethod("getEntity", int.class);
     } catch (final ClassNotFoundException e) {
       failure = "server internals not found (" + e.getMessage() + "); needs Paper 1.20.5 or newer";
     } catch (final NoSuchMethodException e) {
@@ -66,6 +77,8 @@ final class EntityIdApplier {
 
     this.getHandle = handleMethod;
     this.setId = setIdMethod;
+    this.getWorldHandle = worldHandleMethod;
+    this.getEntityById = entityByIdMethod;
     this.unavailableReason = failure;
   }
 
@@ -101,6 +114,13 @@ final class EntityIdApplier {
     if (!isAvailable() || entityId <= 0) {
       return false;
     }
+    if (isTaken(entityId)) {
+      // Forcing it would have the server refuse to add the player to the world, which is a far
+      // worse outcome than the loading screen they get by joining with an ID of this server's own.
+      logger.warning("Entity ID " + entityId + " is already in use here, so " + player.getName()
+          + " joins with a fresh one and gets an ordinary switch");
+      return false;
+    }
     try {
       setId.invoke(getHandle.invoke(player), entityId);
       return true;
@@ -109,6 +129,26 @@ final class EntityIdApplier {
           "Could not set the entity ID for " + player.getName() + "; they will get an ordinary "
               + "switch with a loading screen", e);
       return false;
+    }
+  }
+
+  /**
+   * Returns whether some entity in some world already holds this ID.
+   *
+   * @param entityId the ID the proxy asked for
+   * @return {@code true} if it is taken, or if the question could not be answered
+   */
+  private boolean isTaken(final int entityId) {
+    try {
+      for (final World world : Bukkit.getWorlds()) {
+        if (getEntityById.invoke(getWorldHandle.invoke(world), entityId) != null) {
+          return true;
+        }
+      }
+      return false;
+    } catch (final ReflectiveOperationException | RuntimeException e) {
+      logger.log(Level.WARNING, "Could not check whether entity ID " + entityId + " is free", e);
+      return true;
     }
   }
 }

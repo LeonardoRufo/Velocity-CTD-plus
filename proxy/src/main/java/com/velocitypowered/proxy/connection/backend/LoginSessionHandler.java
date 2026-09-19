@@ -273,16 +273,20 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
    * player joined first -- and it has to know before it builds the join game packet, which is why
    * this rides the login phase rather than an ordinary plugin message.</p>
    *
-   * <p>A zero entity ID means "join the player normally": either the feature is off, or this is a
-   * first join with no prior ID to preserve. The backend treats that as no instruction, and the
-   * proxy's own check then falls back to a normal switch.</p>
+   * <p>The ID is the player's for the whole session, allocated out of a range no backend issues
+   * from, and is asked for on the first join too. A backend that gave out one of its own would
+   * sooner or later hand a player an ID it had already given to a hologram or a dropped item, and
+   * a server refuses to add an entity whose ID is taken -- the player would not enter the world.</p>
+   *
+   * <p>A zero entity ID means "join the player normally": the feature is off. The backend treats
+   * that as no instruction, and the proxy's own check then falls back to a normal switch.</p>
    *
    * @return the response payload: a format byte followed by the entity ID
    */
   private ByteBuf seamlessHandshake() {
     final ConnectedPlayer player = serverConn.getPlayer();
     final int entityId = server.getConfiguration().isKeepClientWorldOnSwitch()
-        ? ClientWorldSwitches.clientEntityId(player.getUniqueId())
+        ? ClientWorldSwitches.networkEntityId(player.getUniqueId())
         : 0;
 
     final ByteBuf response = Unpooled.buffer(5);

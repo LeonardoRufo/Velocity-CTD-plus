@@ -44,6 +44,7 @@ import com.velocitypowered.proxy.connection.forge.legacy.LegacyForgeConstants;
 import com.velocitypowered.proxy.connection.player.resourcepack.ResourcePackResponseBundle;
 import com.velocitypowered.proxy.connection.registry.DimensionInfo;
 import com.velocitypowered.proxy.protocol.MinecraftPacket;
+import com.velocitypowered.proxy.protocol.ProtocolUtils;
 import com.velocitypowered.proxy.protocol.StateRegistry;
 import com.velocitypowered.proxy.protocol.netty.MinecraftDecoder;
 import com.velocitypowered.proxy.protocol.packet.BossBarPacket;
@@ -137,6 +138,8 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
   private final List<UUID> serverBossBars = new ArrayList<>();
 
   private final ServerScoreboardTracker serverScoreboard = new ServerScoreboardTracker();
+
+  private final ServerEntityTracker serverEntities = new ServerEntityTracker();
 
   private final Queue<PluginMessagePacket> loginPluginMessages = new ConcurrentLinkedQueue<>();
 
@@ -653,6 +656,7 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
       player.clearPlayerListHeaderAndFooterSilent();
       player.getTabList().clearAllSilent();
       serverScoreboard.clear();
+      serverEntities.clear();
       if (player.getProtocolVersion().noLessThan(ProtocolVersion.MINECRAFT_1_20_2)) {
         player.getBossBarManager().dropPackets();
       } else {
@@ -700,6 +704,14 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
       // stops the client from tearing down and rebuilding its level -- no terrain loading screen.
       player.getTabList().clearAll();
 
+      // A kept world keeps everything in it, and the destination cannot remove entities it never
+      // spawned, so the previous server's holograms and NPCs would hang here frozen.
+      final ByteBuf entityRemoval = serverEntities.drainRemovals(
+          player.getConnection().getChannel().alloc(), player.getProtocolVersion());
+      if (entityRemoval != null) {
+        player.getConnection().delayedWrite(entityRemoval);
+      }
+
       // Because it never receives a join game, the client never reports that it finished loading
       // the world. The backend waits for that before it accepts movement, so the player would
       // stand still server-side while their client walks away. It is loaded by definition here,
@@ -709,6 +721,9 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
     } else {
       // Clear tab list to avoid duplicate entries
       player.getTabList().clearAll();
+
+      // The join game below rebuilds the client's level, which takes its entities with it.
+      serverEntities.clear();
 
       // The player is switching from a server already, so we need to tell the client to change
       // entity IDs and send new dimension information.
@@ -874,13 +889,25 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
   }
 
   /**
-   * Notes a scoreboard objective or team the backend creates or removes, so the next switch can
-   * remove it from the client. See {@link ServerScoreboardTracker}.
+   * Notes what the backend puts on the client that a switch would otherwise leave behind: scoreboard
+   * objectives and teams, and spawned entities. See {@link ServerScoreboardTracker} and
+   * {@link ServerEntityTracker}.
    *
    * @param packet a clientbound play packet the proxy forwards undecoded; left untouched
    */
-  public void observeServerScoreboard(ByteBuf packet) {
-    serverScoreboard.observe(packet, player.getProtocolVersion());
+  public void observeServerPacket(ByteBuf packet) {
+    final int start = packet.readerIndex();
+    try {
+      final int packetId = ProtocolUtils.readVarInt(packet);
+      final int afterId = packet.readerIndex();
+      serverScoreboard.observe(packetId, packet, player.getProtocolVersion());
+      packet.readerIndex(afterId);
+      serverEntities.observe(packetId, packet, player.getProtocolVersion());
+    } catch (RuntimeException malformed) {
+      // Not ours to judge: the packet is forwarded as it is, it just goes untracked.
+    } finally {
+      packet.readerIndex(start);
+    }
   }
 
   private boolean handleCommandTabComplete(TabCompleteRequestPacket packet) {

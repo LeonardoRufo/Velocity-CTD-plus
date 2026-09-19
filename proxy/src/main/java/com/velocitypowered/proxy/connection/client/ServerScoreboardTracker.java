@@ -58,31 +58,22 @@ final class ServerScoreboardTracker {
   /**
    * Notes an objective or team the backend creates or removes.
    *
-   * @param packet  a clientbound play packet as forwarded, positioned at its ID; left untouched
-   * @param version the client's protocol version
+   * @param packetId the packet's ID, already read
+   * @param packet   the rest of the packet, which the caller rewinds
+   * @param version  the client's protocol version
    */
-  void observe(ByteBuf packet, ProtocolVersion version) {
-    if (!isTracked(version)) {
+  void observe(int packetId, ByteBuf packet, ProtocolVersion version) {
+    if (!isTracked(version)
+        || (packetId != OBJECTIVE_PACKET_ID && packetId != TEAM_PACKET_ID)) {
       return;
     }
-    final int start = packet.readerIndex();
-    try {
-      final int packetId = ProtocolUtils.readVarInt(packet);
-      if (packetId != OBJECTIVE_PACKET_ID && packetId != TEAM_PACKET_ID) {
-        return;
-      }
-      final String name = ProtocolUtils.readString(packet);
-      final byte method = packet.readByte();
-      final Set<String> names = packetId == OBJECTIVE_PACKET_ID ? objectives : teams;
-      if (method == METHOD_ADD) {
-        names.add(name);
-      } else if (method == METHOD_REMOVE) {
-        names.remove(name);
-      }
-    } catch (RuntimeException malformed) {
-      // Not ours to judge: the packet is forwarded as it is, it just goes untracked.
-    } finally {
-      packet.readerIndex(start);
+    final String name = ProtocolUtils.readString(packet);
+    final byte method = packet.readByte();
+    final Set<String> names = packetId == OBJECTIVE_PACKET_ID ? objectives : teams;
+    if (method == METHOD_ADD) {
+      names.add(name);
+    } else if (method == METHOD_REMOVE) {
+      names.remove(name);
     }
   }
 

@@ -9,6 +9,7 @@ package com.velocitypowered.api.proxy.player;
 
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Tracks the entity ID a client currently uses for its own player.
@@ -24,9 +25,44 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class ClientWorldSwitches {
 
+  /**
+   * Where the IDs handed to backends start.
+   *
+   * <p>A backend counts its own entities up from zero and is restarted long before it could reach
+   * this, and the libraries that fake entities with packets count down from the top of the range,
+   * so an ID from here belongs to the player it was given to and to nobody else. That matters
+   * because a server refuses to add an entity whose ID is already taken -- the arriving player
+   * would simply never enter the world.</p>
+   */
+  public static final int NETWORK_ENTITY_ID_BASE = 1_000_000_000;
+
+  /** Where they stop, leaving the range they occupy far from either counter. */
+  private static final int NETWORK_ENTITY_ID_CEILING = 1_100_000_000;
+
   private static final ConcurrentHashMap<UUID, Integer> CLIENT_ENTITY_IDS = new ConcurrentHashMap<>();
 
+  private static final ConcurrentHashMap<UUID, Integer> NETWORK_ENTITY_IDS = new ConcurrentHashMap<>();
+
+  private static final AtomicInteger NEXT_NETWORK_ENTITY_ID =
+      new AtomicInteger(NETWORK_ENTITY_ID_BASE);
+
   private ClientWorldSwitches() {
+  }
+
+  /**
+   * Returns the entity ID every backend should give this player, allocating one on first use.
+   *
+   * <p>Letting each backend issue its own would work until one of them handed the player an ID it
+   * had already given to a hologram or a dropped item. One ID per player, from a range no backend
+   * allocates out of, removes that whole class of collision -- and it holds for the first server
+   * too, so the ID never changes for the length of the session.</p>
+   *
+   * @param playerId the player
+   * @return the entity ID to ask backends for
+   */
+  public static int networkEntityId(UUID playerId) {
+    return NETWORK_ENTITY_IDS.computeIfAbsent(playerId, id -> NEXT_NETWORK_ENTITY_ID.updateAndGet(
+        previous -> previous >= NETWORK_ENTITY_ID_CEILING ? NETWORK_ENTITY_ID_BASE : previous + 1));
   }
 
   /**
@@ -62,5 +98,6 @@ public final class ClientWorldSwitches {
    */
   public static void forget(UUID playerId) {
     CLIENT_ENTITY_IDS.remove(playerId);
+    NETWORK_ENTITY_IDS.remove(playerId);
   }
 }

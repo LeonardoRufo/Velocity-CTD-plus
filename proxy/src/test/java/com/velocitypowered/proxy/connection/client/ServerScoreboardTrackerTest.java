@@ -20,6 +20,7 @@ package com.velocitypowered.proxy.connection.client;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.velocitypowered.api.network.ProtocolVersion;
@@ -58,8 +59,7 @@ class ServerScoreboardTrackerTest {
     final ServerScoreboardTracker tracker = new ServerScoreboardTracker();
     for (ByteBuf buf : List.of(
         packet(OBJECTIVE, "sidebar", 0, 1, 2, 3),
-        packet(0x2C, "not-a-scoreboard-packet", 0),
-        truncated(packet(TEAM, "nametag", 0)))) {
+        packet(0x2C, "not-a-scoreboard-packet", 0))) {
       buf.readerIndex(0);
       final byte[] before = ByteBufUtil.getBytes(buf);
       observe(tracker, buf);
@@ -69,11 +69,17 @@ class ServerScoreboardTrackerTest {
   }
 
   @Test
-  void ignoresMalformedPackets() {
+  void leavesMalformedPacketsToTheCaller() {
+    // ClientPlaySessionHandler catches this and forwards the packet untracked; what must not
+    // happen is a half-read packet being treated as a real objective or team.
     final ServerScoreboardTracker tracker = new ServerScoreboardTracker();
-    observe(tracker, truncated(packet(TEAM, "nametag", 0)));
-    observe(tracker, Unpooled.buffer());
+    final ByteBuf truncated = truncated(packet(TEAM, "nametag", 0));
+    assertThrows(RuntimeException.class, () -> observeRaw(tracker, truncated));
     assertEquals(Set.of(), removals(tracker));
+  }
+
+  private static void observeRaw(ServerScoreboardTracker tracker, ByteBuf packet) {
+    tracker.observe(ProtocolUtils.readVarInt(packet), packet, V26_2);
   }
 
   @Test
@@ -85,19 +91,27 @@ class ServerScoreboardTrackerTest {
           StateRegistry.PLAY.getProtocolRegistry(ProtocolUtils.Direction.CLIENTBOUND, version);
       assertNull(registry.createPacket(OBJECTIVE), "objective packet decoded on " + version);
       assertNull(registry.createPacket(TEAM), "team packet decoded on " + version);
+      assertNull(registry.createPacket(0x01), "spawn entity packet decoded on " + version);
+      assertNull(registry.createPacket(0x4D), "remove entities packet decoded on " + version);
     }
   }
 
   @Test
   void tracksNothingOnProtocolsWhoseIdsItDoesNotKnow() {
     final ServerScoreboardTracker tracker = new ServerScoreboardTracker();
-    tracker.observe(packet(OBJECTIVE, "sidebar", 0), ProtocolVersion.MINECRAFT_1_21_11);
-    tracker.observe(packet(OBJECTIVE, "sidebar", 0), ProtocolVersion.MINECRAFT_26_3);
+    tracker.observe(OBJECTIVE, payload("sidebar", 0), ProtocolVersion.MINECRAFT_1_21_11);
+    tracker.observe(OBJECTIVE, payload("sidebar", 0), ProtocolVersion.MINECRAFT_26_3);
     assertTrue(tracker.drainRemovals(UnpooledByteBufAllocator.DEFAULT, ProtocolVersion.MINECRAFT_26_3).isEmpty());
   }
 
+  /** Feeds a packet the way ClientPlaySessionHandler does: ID first, then rewind for the next. */
   private static void observe(ServerScoreboardTracker tracker, ByteBuf packet) {
-    tracker.observe(packet, V26_2);
+    final int start = packet.readerIndex();
+    try {
+      tracker.observe(ProtocolUtils.readVarInt(packet), packet, V26_2);
+    } finally {
+      packet.readerIndex(start);
+    }
   }
 
   /** A packet as forwarded: ID, name, method, then an arbitrary rest the tracker must not care about. */
@@ -109,6 +123,14 @@ class ServerScoreboardTrackerTest {
     for (int b : rest) {
       buf.writeByte(b);
     }
+    return buf;
+  }
+
+  /** A packet body without its ID, as the trackers see it. */
+  private static ByteBuf payload(String name, int method) {
+    final ByteBuf buf = Unpooled.buffer();
+    ProtocolUtils.writeString(buf, name);
+    buf.writeByte(method);
     return buf;
   }
 
