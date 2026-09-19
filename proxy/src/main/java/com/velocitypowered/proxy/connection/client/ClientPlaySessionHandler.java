@@ -136,6 +136,8 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
 
   private final List<UUID> serverBossBars = new ArrayList<>();
 
+  private final ServerScoreboardTracker serverScoreboard = new ServerScoreboardTracker();
+
   private final Queue<PluginMessagePacket> loginPluginMessages = new ConcurrentLinkedQueue<>();
 
   private final AtomicLong loginPluginMessagesBytes = new AtomicLong();
@@ -650,6 +652,7 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
       spawned = false;
       player.clearPlayerListHeaderAndFooterSilent();
       player.getTabList().clearAllSilent();
+      serverScoreboard.clear();
       if (player.getProtocolVersion().noLessThan(ProtocolVersion.MINECRAFT_1_20_2)) {
         player.getBossBarManager().dropPackets();
       } else {
@@ -671,6 +674,17 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
    */
   public void handleBackendJoinGame(JoinGamePacket joinGame, VelocityServerConnection destination) {
     MinecraftConnection serverMc = destination.ensureConnected();
+
+    if (spawned && server.getConfiguration().isRemoveReconfig()) {
+      // Nothing else wipes the client's scoreboard or tab header when it stays in play, so the
+      // previous server's sidebar, teams and header would outlive the switch. Remove them before
+      // anything from the destination is relayed, and before a join game on the fallback path.
+      for (ByteBuf removal : serverScoreboard.drainRemovals(
+          player.getConnection().getChannel().alloc(), player.getProtocolVersion())) {
+        player.getConnection().delayedWrite(removal);
+      }
+      player.clearPlayerListHeaderAndFooter();
+    }
 
     if (!spawned) {
       // The player wasn't spawned in yet, so we don't need to do anything special.
@@ -857,6 +871,16 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
 
   public List<UUID> getServerBossBars() {
     return serverBossBars;
+  }
+
+  /**
+   * Notes a scoreboard objective or team the backend creates or removes, so the next switch can
+   * remove it from the client. See {@link ServerScoreboardTracker}.
+   *
+   * @param packet a clientbound play packet the proxy forwards undecoded; left untouched
+   */
+  public void observeServerScoreboard(ByteBuf packet) {
+    serverScoreboard.observe(packet, player.getProtocolVersion());
   }
 
   private boolean handleCommandTabComplete(TabCompleteRequestPacket packet) {

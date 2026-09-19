@@ -485,6 +485,11 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
 
   @Override
   public void handleUnknown(ByteBuf buf) {
+    // Same reason as the boss bars above: without the configuration state the client keeps its
+    // scoreboard across a switch, so what this server creates has to be tracked to be removed.
+    if (server.getConfiguration().isRemoveReconfig()) {
+      playerSessionHandler.observeServerScoreboard(buf);
+    }
     boolean huge = buf.readableBytes() > LARGE_PACKET_THRESHOLD;
     playerConnection.delayedWrite(buf.retain());
     if (huge || ++packetsFlushed >= MAXIMUM_PACKETS_TO_FLUSH) {
