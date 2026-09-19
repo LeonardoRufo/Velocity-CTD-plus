@@ -154,6 +154,14 @@ remove-reconfig = false
 # Needs "remove-reconfig" to be useful: on its own, the configuration state still rebuilds the
 # client's world.
 keep-client-world-on-switch = false
+# The servers that stand on the same map, so that keeping the client's world is invisible when it
+# moves between them. Anywhere else the client would watch the old map dissolve into the new one
+# while its chunks arrive, which is worse than the loading screen it saves, so "keep-client-world-
+# on-switch" applies within a group and nowhere else. A server always shares a map with itself,
+# under any of the names it is registered as.
+keep-client-world-groups = [
+    # ["lobby1", "lobby2"]
+]
 
 # If false, disables logging for offline player connections.
 log-offline-connections = true

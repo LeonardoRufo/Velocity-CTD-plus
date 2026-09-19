@@ -135,6 +135,9 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
 
   private @Nullable String clientDimension;
 
+  /** The server whose world the client is holding, to tell a switch within a map from one across. */
+  private @Nullable String clientWorldServer;
+
   private final List<UUID> serverBossBars = new ArrayList<>();
 
   private final ServerScoreboardTracker serverScoreboard = new ServerScoreboardTracker();
@@ -697,8 +700,8 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
       player.getConnection().delayedWrite(joinGame);
       // Required for Legacy Forge
       player.getPhase().onFirstJoin(player);
-      rememberClientWorld(joinGame);
-    } else if (canKeepClientWorld(joinGame)) {
+      rememberClientWorld(joinGame, destination);
+    } else if (canKeepClientWorld(joinGame, destination)) {
       // The destination has put the player back in the dimension the client already has, under the
       // entity ID it already has. Withholding the join game and respawn packets is precisely what
       // stops the client from tearing down and rebuilding its level -- no terrain loading screen.
@@ -733,7 +736,7 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
         this.doFastClientServerSwitch(joinGame);
       }
 
-      rememberClientWorld(joinGame);
+      rememberClientWorld(joinGame, destination);
     }
 
     destination.setEntityId(joinGame.getEntityId()); // Sound API function
@@ -790,7 +793,8 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
     destination.completeJoin();
   }
 
-  private void rememberClientWorld(JoinGamePacket joinGame) {
+  private void rememberClientWorld(JoinGamePacket joinGame, VelocityServerConnection destination) {
+    clientWorldServer = destination.getServerInfo().getName();
     clientEntityId = joinGame.getEntityId();
     clientDimension = dimensionKey(joinGame.getDimensionInfo(), joinGame.getDimension());
     ClientWorldSwitches.rememberClientEntityId(player.getUniqueId(), clientEntityId);
@@ -824,8 +828,15 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
    * {@link ClientWorldSwitches}. When either does not hold we fall back to an ordinary switch, so
    * turning this on cannot break a session, only fail to help.</p>
    */
-  private boolean canKeepClientWorld(JoinGamePacket joinGame) {
+  private boolean canKeepClientWorld(JoinGamePacket joinGame, VelocityServerConnection destination) {
     if (!server.getConfiguration().isKeepClientWorldOnSwitch()) {
+      return false;
+    }
+
+    // Across maps the client would watch the old one dissolve into the new, which is worse than
+    // the screen it saves. Only the operator knows which servers are copies of one another.
+    if (!server.getConfiguration().getSharedMapGroups()
+        .sameMap(clientWorldServer, destination.getServerInfo().getName())) {
       return false;
     }
 
@@ -846,12 +857,12 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
       return false;
     }
 
-    final String destination = dimensionKey(joinGame.getDimensionInfo(), joinGame.getDimension());
-    if (!Objects.equals(destination, clientDimension)) {
+    final String joinedInto = dimensionKey(joinGame.getDimensionInfo(), joinGame.getDimension());
+    if (!Objects.equals(joinedInto, clientDimension)) {
       LOGGER.info("{} rebuilds its world for {}: it joined them into {}, their client is in {}",
           player.getConnectedServer() == null ? "the destination"
               : player.getConnectedServer().getServerInfo().getName(),
-          player.getUsername(), destination, clientDimension);
+          player.getUsername(), joinedInto, clientDimension);
       return false;
     }
 

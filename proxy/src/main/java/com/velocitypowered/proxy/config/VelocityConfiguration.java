@@ -168,6 +168,8 @@ public final class VelocityConfiguration implements ProxyConfig {
   private final boolean removeReconfig;
   private final boolean keepClientWorldOnSwitch;
 
+  private final SharedMapGroups sharedMapGroups;
+
   @Expose
   private final boolean forceKeyAuthentication;
 
@@ -266,6 +268,7 @@ public final class VelocityConfiguration implements ProxyConfig {
                                 PingPassthroughMode pingPassthrough,
                                 boolean enablePlayerAddressLogging,
                                 boolean removeReconfig, boolean keepClientWorldOnSwitch,
+                                SharedMapGroups sharedMapGroups,
                                 Servers servers, ForcedHosts forcedHosts,
                                 Map<String, List<String>> commandAliases,
                                 Map<String, List<String>> proxyCommandAliases,
@@ -297,6 +300,7 @@ public final class VelocityConfiguration implements ProxyConfig {
     this.enablePlayerAddressLogging = enablePlayerAddressLogging;
     this.removeReconfig = removeReconfig;
     this.keepClientWorldOnSwitch = keepClientWorldOnSwitch;
+    this.sharedMapGroups = sharedMapGroups;
     this.servers = servers;
     this.forcedHosts = forcedHosts;
     this.commandAliases = commandAliases;
@@ -856,6 +860,15 @@ public final class VelocityConfiguration implements ProxyConfig {
     return keepClientWorldOnSwitch;
   }
 
+  /**
+   * Returns the servers the operator says stand on the same map.
+   *
+   * @return the groups
+   */
+  public SharedMapGroups getSharedMapGroups() {
+    return sharedMapGroups;
+  }
+
   public boolean isBungeePluginChannelEnabled() {
     return advanced.isBungeePluginMessageChannel();
   }
@@ -1100,6 +1113,7 @@ public final class VelocityConfiguration implements ProxyConfig {
         .add("enablePlayerAddressLogging", enablePlayerAddressLogging)
         .add("removeReconfig", removeReconfig)
         .add("keepClientWorldOnSwitch", keepClientWorldOnSwitch)
+        .add("sharedMapGroups", sharedMapGroups)
         .add("forceKeyAuthentication", forceKeyAuthentication)
         .add("packetLimiterConfig", packetLimiterConfig)
         .add("logPlayerConnections", logPlayerConnections)
@@ -1247,6 +1261,7 @@ public final class VelocityConfiguration implements ProxyConfig {
       boolean enablePlayerAddressLogging = config.getOrElse("enable-player-address-logging", true);
       boolean removeReconfig = config.getOrElse("remove-reconfig", false);
       boolean keepClientWorldOnSwitch = config.getOrElse("keep-client-world-on-switch", false);
+      SharedMapGroups sharedMapGroups = SharedMapGroups.from(config.get("keep-client-world-groups"));
       PacketLimiterConfig packetLimiterConfig = PacketLimiterConfig.fromConfig(config.get("packet-limiter"));
       AntiVpnConfig antiVpnConfig = AntiVpnConfig.fromConfig(config.get("anti-vpn"));
       boolean logPlayerConnections = config.getOrElse("log-player-connections", true);
@@ -1352,6 +1367,7 @@ public final class VelocityConfiguration implements ProxyConfig {
           enablePlayerAddressLogging,
           removeReconfig,
           keepClientWorldOnSwitch,
+          sharedMapGroups,
           new Servers(serversConfig),
           new ForcedHosts(forcedHostsConfig),
           parseAliasMap(commandAliasesConfig, "command-aliases"),
