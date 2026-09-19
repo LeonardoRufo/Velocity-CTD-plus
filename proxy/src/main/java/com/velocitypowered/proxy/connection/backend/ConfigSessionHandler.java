@@ -110,6 +110,10 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
 
   private final RegistryFingerprint registryFingerprint = new RegistryFingerprint();
 
+  // Whether this server's tags reached a client that stayed in play, and so whether it now holds
+  // everything this server sent rather than the previous server's tags.
+  private boolean tagsSentInPlay;
+
   /**
    * Creates the new transition handler.
    *
@@ -153,12 +157,22 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(TagsUpdatePacket packet) {
-    registryFingerprint.add(packet, serverConn.getPlayer().getProtocolVersion());
+    final ConnectedPlayer player = serverConn.getPlayer();
+    registryFingerprint.add(packet, player.getProtocolVersion());
     if (clientStayedInPlay()) {
+      // The client never entered the configuration state these arrive in, but the play state has
+      // the same packet -- it is what a datapack reload sends -- so hand them over there instead
+      // of dropping them and leaving the client on the previous server's tags.
+      final ByteBuf inPlay = TagsInPlay.encode(packet, player.getProtocolVersion(),
+          player.getConnection().getChannel().alloc());
+      if (inPlay != null) {
+        player.getConnection().write(inPlay);
+        tagsSentInPlay = true;
+      }
       return true;
     }
 
-    serverConn.getPlayer().getConnection().write(packet);
+    player.getConnection().write(packet);
     return true;
   }
 
@@ -290,10 +304,16 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
         player.getConnection().getActiveSessionHandler() instanceof ClientConfigSessionHandler handler
             ? handler : null;
 
-    final String sentRegistries = rememberRegistries(serverConn.getServer());
+    final String sentRegistries = rememberRegistries(serverConn.getServer(), player);
     if (configHandler == null && !sentRegistries.equals(player.getClientRegistryFingerprint())) {
       switchAgainThroughConfiguration(player);
       return true;
+    }
+
+    if (configHandler == null && tagsSentInPlay) {
+      // The client stayed in play and took this server's tags, so what it holds is no longer the
+      // previous server's. Only the tags can have changed: the registries had to match already.
+      player.setClientRegistryHashes(registryFingerprint.perRegistry());
     }
 
     smc.getChannel().pipeline().get(MinecraftVarintFrameDecoder.class).setState(StateRegistry.PLAY);
@@ -516,10 +536,11 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
    * whether the client would need them.
    *
    * @param target the server whose configuration phase is finishing
+   * @param player the player it is finishing for, whose version decides whether tags count
    * @return the fingerprint of what it sent
    */
-  private String rememberRegistries(VelocityRegisteredServer target) {
-    final String sent = registryFingerprint.finish();
+  private String rememberRegistries(VelocityRegisteredServer target, ConnectedPlayer player) {
+    final String sent = registryFingerprint.finish(player.getProtocolVersion());
     final String previous = target.getRegistryFingerprint();
     if (!sent.equals(previous)) {
       target.setRegistryFingerprint(sent);

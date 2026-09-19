@@ -47,22 +47,16 @@ final class RegistryFingerprint {
   /** What is hashed under, for the tags, which are not a registry of their own. */
   private static final String TAGS = "(tags)";
 
-  private final MessageDigest digest;
+  private final MessageDigest registries = sha256();
+
+  private final MessageDigest tags = sha256();
 
   /** One hash per registry, in the order sent, to name what differs between two backends. */
   private final Map<String, String> perRegistry = new LinkedHashMap<>();
 
-  RegistryFingerprint() {
-    try {
-      digest = MessageDigest.getInstance("SHA-256");
-    } catch (NoSuchAlgorithmException e) {
-      throw new IllegalStateException("Every Java platform is required to provide SHA-256", e);
-    }
-  }
-
   void add(RegistrySyncPacket packet) {
     final ByteBuf content = packet.content();
-    digest.update(content.nioBuffer());
+    registries.update(content.nioBuffer());
     // Each of these carries one registry, named first, so the name comes off a read-only view.
     perRegistry.put(nameOf(content), hashOf(content));
   }
@@ -72,7 +66,7 @@ final class RegistryFingerprint {
     final ByteBuf encoded = Unpooled.buffer();
     try {
       packet.encode(encoded, ProtocolUtils.Direction.CLIENTBOUND, version);
-      digest.update(encoded.nioBuffer());
+      tags.update(encoded.nioBuffer());
       perRegistry.put(TAGS, hashOf(encoded));
     } finally {
       encoded.release();
@@ -94,10 +88,14 @@ final class RegistryFingerprint {
   }
 
   private static String hashOf(ByteBuf content) {
+    final MessageDigest one = sha256();
+    one.update(content.nioBuffer());
+    return HexFormat.of().formatHex(one.digest());
+  }
+
+  private static MessageDigest sha256() {
     try {
-      final MessageDigest one = MessageDigest.getInstance("SHA-256");
-      one.update(content.nioBuffer());
-      return HexFormat.of().formatHex(one.digest());
+      return MessageDigest.getInstance("SHA-256");
     } catch (NoSuchAlgorithmException e) {
       throw new IllegalStateException("Every Java platform is required to provide SHA-256", e);
     }
@@ -135,11 +133,20 @@ final class RegistryFingerprint {
   }
 
   /**
-   * Returns the hash of everything added. Call once, when the configuration phase finishes.
+   * Returns the hash of what a client has to already hold for it to stay in play. Call once, when
+   * the configuration phase finishes.
    *
+   * <p>The registries always count. The tags only do on a version whose play-state tags packet the
+   * proxy does not know, since anywhere else differing tags are sent to the client instead of
+   * costing it the configuration state.</p>
+   *
+   * @param version the client's protocol version
    * @return the hash, in hex
    */
-  String finish() {
-    return HexFormat.of().formatHex(digest.digest());
+  String finish(ProtocolVersion version) {
+    final String registriesHash = HexFormat.of().formatHex(registries.digest());
+    return TagsInPlay.canSend(version)
+        ? registriesHash
+        : registriesHash + ':' + HexFormat.of().formatHex(tags.digest());
   }
 }

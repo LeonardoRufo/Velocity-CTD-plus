@@ -48,6 +48,8 @@ class RegistryFingerprintTest {
   private static final byte[] BIOMES_WITH_DATAPACK = {1, 2, 3, 4, 5};
   private static final Map<String, Map<String, int[]>> TAGS =
       ImmutableMap.of("minecraft:block", ImmutableMap.of("minecraft:climbable", new int[] {7, 9}));
+  private static final Map<String, Map<String, int[]>> OTHER_TAGS =
+      ImmutableMap.of("minecraft:block", ImmutableMap.of("minecraft:climbable", new int[] {7}));
 
   @Test
   void sameRegistriesAndTagsGiveTheSameFingerprint() {
@@ -60,10 +62,17 @@ class RegistryFingerprintTest {
   }
 
   @Test
-  void differentTagsChangeTheFingerprint() {
-    final Map<String, Map<String, int[]>> otherTags =
-        ImmutableMap.of("minecraft:block", ImmutableMap.of("minecraft:climbable", new int[] {7}));
-    assertNotEquals(fingerprint(VANILLA_BIOMES, TAGS), fingerprint(VANILLA_BIOMES, otherTags));
+  void differentTagsDoNotCostTheClientItsPlayState() {
+    // On a version whose play-state tags packet the proxy knows, tags are sent to the client
+    // rather than demanded of the destination, so they cannot keep it from staying in play.
+    assertEquals(fingerprint(VANILLA_BIOMES, TAGS), fingerprint(VANILLA_BIOMES, OTHER_TAGS));
+  }
+
+  @Test
+  void differentTagsCountOnVersionsTheyCannotBeSentOn() {
+    final ProtocolVersion old = ProtocolVersion.MINECRAFT_1_21_11;
+    assertNotEquals(fingerprint(VANILLA_BIOMES, TAGS, old), fingerprint(VANILLA_BIOMES, OTHER_TAGS, old));
+    assertEquals(fingerprint(VANILLA_BIOMES, TAGS, old), fingerprint(VANILLA_BIOMES, TAGS, old));
   }
 
   @Test
@@ -94,13 +103,18 @@ class RegistryFingerprintTest {
   }
 
   private static String fingerprint(byte[] registries, Map<String, Map<String, int[]>> tags) {
+    return fingerprint(registries, tags, VERSION);
+  }
+
+  private static String fingerprint(byte[] registries, Map<String, Map<String, int[]>> tags,
+                                    ProtocolVersion version) {
     final RegistrySyncPacket registryPacket = new RegistrySyncPacket();
-    registryPacket.decode(Unpooled.wrappedBuffer(registries), ProtocolUtils.Direction.CLIENTBOUND, VERSION);
+    registryPacket.decode(Unpooled.wrappedBuffer(registries), ProtocolUtils.Direction.CLIENTBOUND, version);
     final RegistryFingerprint fingerprint = new RegistryFingerprint();
     fingerprint.add(registryPacket);
-    fingerprint.add(new TagsUpdatePacket(tags), VERSION);
+    fingerprint.add(new TagsUpdatePacket(tags), version);
     registryPacket.release();
-    return fingerprint.finish();
+    return fingerprint.finish(version);
   }
 
   private static VelocityRegisteredServer server(String name) {
