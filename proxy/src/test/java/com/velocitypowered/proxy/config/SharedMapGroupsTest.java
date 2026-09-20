@@ -48,6 +48,13 @@ class SharedMapGroupsTest {
   }
 
   @Test
+  void onlyGroupedServersAreAskedToReuseAnEntityId() {
+    assertTrue(LOBBIES.isGrouped("lobby-2"));
+    assertFalse(LOBBIES.isGrouped("spawn"), "nothing there keeps a world, so nothing is needed");
+    assertFalse(LOBBIES.isGrouped(null));
+  }
+
+  @Test
   void groupsThatSayNothingAreIgnored() {
     final SharedMapGroups odd = SharedMapGroups.from(
         List.of(List.of("alone"), "not-a-list", List.of("a", "b"), List.of()));

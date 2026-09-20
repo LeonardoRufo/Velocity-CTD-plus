@@ -284,7 +284,12 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
    */
   private ByteBuf seamlessHandshake() {
     final ConnectedPlayer player = serverConn.getPlayer();
+    // Only servers that share a map with another have any use for it: those are the only switches
+    // that keep the client's world. Everywhere else the backend issues its own ID as it always did,
+    // which keeps this out of the way of servers that gain nothing from it.
     final int entityId = server.getConfiguration().isKeepClientWorldOnSwitch()
+        && server.getConfiguration().getSharedMapGroups()
+            .isGrouped(serverConn.getServerInfo().getName())
         ? ClientWorldSwitches.networkEntityId(player.getUniqueId())
         : 0;
 

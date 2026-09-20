@@ -83,6 +83,17 @@ public final class SharedMapGroups {
   }
 
   /**
+   * Returns whether this server shares its map with any other, and so whether a client arriving
+   * there has any use for the entity ID the proxy hands out.
+   *
+   * @param server the server being joined
+   * @return {@code true} if it belongs to a group
+   */
+  public boolean isGrouped(@Nullable String server) {
+    return server != null && groupByServer.containsKey(server.toLowerCase(Locale.ROOT));
+  }
+
+  /**
    * Returns whether a client on {@code from} can keep its world when it moves to {@code to}.
    *
    * @param from the server the client's world came from

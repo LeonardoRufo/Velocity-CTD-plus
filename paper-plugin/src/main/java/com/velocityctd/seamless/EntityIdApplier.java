@@ -114,6 +114,14 @@ final class EntityIdApplier {
     if (!isAvailable() || entityId <= 0) {
       return false;
     }
+    // A session of theirs that is still leaving still owns its entity, and the server refuses a
+    // second one under the same ID or the same UUID. Reconnecting fast is exactly when that
+    // happens, and forcing the ID there turns a slow disconnect into a loop of failed joins.
+    if (Bukkit.getPlayerExact(player.getName()) != null) {
+      logger.warning("A session of " + player.getName() + " is still on this server, so they join "
+          + "with a fresh entity ID and get an ordinary switch");
+      return false;
+    }
     if (isTaken(entityId)) {
       // Forcing it would have the server refuse to add the player to the world, which is a far
       // worse outcome than the loading screen they get by joining with an ID of this server's own.
